@@ -58,4 +58,4 @@ def main(name, n_steps, n_envs, seed):
 
 
 if __name__ == '__main__':
-    main('BreakoutNoFrameskip-v4', 2000, 1, 1)
+    main('BreakoutNoFrameskip-v4', 50000, 1, 1)
