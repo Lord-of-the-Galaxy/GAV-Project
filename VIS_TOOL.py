@@ -1,174 +1,216 @@
+from samdp import samdp_search
+from matplotlib.widgets import Button
+from turtle import color
+from cuml import TSNE
+from time import time
+from control_buttons import GAME1, SEED1
+from control_buttons import add_buttons as add_control_buttons
+from matplotlib.widgets import Button, Slider, CheckButtons
+import matplotlib.pyplot as plt
+import numpy as np
 import warnings
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 
-import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.widgets import Button, Slider, CheckButtons
-from control_buttons import add_buttons as add_control_buttons
-from control_buttons import GAME1, GAME2, GAME1_SHORT, GAME2_SHORT, INDEX
-from time import time
-import numpy as np
-from cuml import TSNE
-from turtle import color
-import numpy as np
-from matplotlib.widgets import Button
-
-from samdp import samdp_search
 
 class VIS_TOOL:
 
     def __init__(self):
 
-
-        # 1. Constants
+        # 1 Constants
         self.perplexity = 60
 
-        # 2. Plots
-        self.fig = plt.figure('tSNE')
-        
-        
+        # 2 Plots
+        self.fig = plt.figure('tSNE + SAMDP')
 
-        # 2.1 t-SNE
-        self.ax_tsne = plt.subplot2grid((30,40),(0,0), rowspan=30, colspan=30)
-        self.ax_screen = plt.subplot2grid((30,40),(15,33), rowspan=15, colspan=7)
-        self.tsne_scat = self.ax_tsne.scatter([0],[0])
-        self.cbar = self.fig.colorbar(self.tsne_scat)
-        self.samdp_lines = self.ax_tsne.plot()
-        self.update_tSNE(GAME1)
-
-
-        '''
-        # 2.3 gradient image (saliency map)
-        self.ax_state = plt.subplot2grid((3,5),(2,4), rowspan=1, colspan=1)
-
-        self.stateplot = self.ax_state.imshow(self.states[self.ind], interpolation='none', cmap='gray',picker=5)
-        self.ax_state.set_xticklabels([])
-        self.ax_state.set_yticklabels([])
-        '''
-
-        # 3. Control buttons
-        add_control_buttons(self)
+        # 2.1 Event Handlers
+        self.fig.canvas.mpl_connect('draw_event', self.on_draw)
         self.fig.canvas.mpl_connect('pick_event', self.on_scatter_pick)
 
-   
+        # 2.2 t-SNE
+        self.ax_tsne = plt.subplot2grid(
+            (30, 40), (0, 0), rowspan=30, colspan=30)
 
-    def update_tSNE(self,game):
-        activation_data = np.load(f'data/{game}/activations_{INDEX}.npy')
-        qvalues = np.load(f'data/{game}/qvalues_{INDEX}.npy')
+        self.tsne_scat = self.ax_tsne.scatter(
+            [0], [0])  # just for the colorbar
+        self.cbar = self.fig.colorbar(self.tsne_scat)
+
+        # 2.3 State image and pointer
+        self.idx = 0
+        self.ax_image = plt.subplot2grid(
+            (30, 40), (15, 33), rowspan=15, colspan=7)
+        self.image = self.ax_image.imshow([[[0, 0, 0]]], interpolation='none')
+        self.ax_image.set_xticklabels([])
+        self.ax_image.set_yticklabels([])
+
+        self.point, = self.ax_tsne.plot([0], [0], animated=True, linestyle="",
+                                        marker="o", markersize=10, markerfacecolor="r", markeredgecolor="k")
+
+        # 2.4 SAMDP
+        self.samdp_done = False
+        self.nc = 0
+        self.coords = np.array([[]])
+        self.P = np.array([[]])
+
+        # 3 Actually compute and draw the tSNE
+        self.update_tSNE(GAME1, SEED1)
+
+        # 4 Control buttons
+        add_control_buttons(self)
+
+    def on_draw(self, event):
+        # grab tSNE plot on every draw
+        self.tsne_plot = self.fig.canvas.copy_from_bbox(self.ax_tsne.bbox)
+        self.draw_animated()
+
+    def draw_animated(self):
+        self.ax_tsne.draw_artist(self.point)
+        self.ax_image.draw_artist(self.image)
+
+        if self.samdp_done:
+            # draw in the SAMDP transitions
+            for i in range(self.nc):
+                for j in range(self.nc):
+                    if self.P[i, j] > 0.02:
+                        a, = self.ax_tsne.plot([self.coords[i, 0], self.coords[j, 0]],
+                                               [self.coords[i, 1], self.coords[j, 1]], c='black', linewidth=self.P[i, j]*5, alpha=0.4, animated=True)
+                        self.ax_tsne.draw_artist(a)
+
+            # draw in SAMDP cluster locations
+            a, = self.ax_tsne.plot(
+                self.coords[:, 0], self.coords[:, 1], animated=True, linestyle="", markersize=12, markerfacecolor='black', markeredgecolor='black', marker='D')
+            self.ax_tsne.draw_artist(a)
+
+    def update_tSNE(self, game, seed):
+        print("Loading...")
+        activation_data = np.load(f'data/{game}/activations_{seed}.npy')
+        qvalues = np.load(f'data/{game}/qvalues_{seed}.npy')
         self.values = np.max(qvalues, axis=1)
-        self.rewards = np.load(f'data/{game}/rewards_{INDEX}.npy')
-        self.screens = np.load(f'data/{game}/images_{INDEX}.npy')
+        self.rewards = np.load(f'data/{game}/rewards_{seed}.npy')
+        self.images = np.load(f'data/{game}/images_{seed}.npy')
         print("Loaded")
 
+        self.idx = 0
+        self.samdp_done = False
 
-        self.pnt_size = 5
-        self.ind      = 0
-        self.prev_ind = 0
-
-        tsne = TSNE(n_components=2, perplexity=self.perplexity, n_neighbors=100+self.perplexity*3, verbose=1, random_state=time(),method = 'fft')
-        print("Running tSNE")
+        tsne = TSNE(n_components=2, perplexity=self.perplexity, n_neighbors=100 +
+                    self.perplexity*3, verbose=1, random_state=time(), method='fft')
+        print("Running tSNE...")
         self.data_t = tsne.fit_transform(activation_data)
         print("tSNE done")
 
         self.num_points = self.data_t.shape[0]
 
-        #self.tsne_scat.remove()
+        # t-SNE plot
         self.ax_tsne.cla()
-        self.tsne_scat = self.ax_tsne.scatter(self.data_t[:,0],
-                                     self.data_t[:,1],
-                                     s= np.ones(self.num_points)*self.pnt_size, c = self.values, cmap='gist_rainbow',picker=5)
+        self.tsne_scat = self.ax_tsne.scatter(self.data_t[:, 0], self.data_t[:, 1],
+                                              s=5, c=self.values, cmap='gist_rainbow', picker=5)
 
         self.ax_tsne.set_xticklabels([])
         self.ax_tsne.set_yticklabels([])
 
-        #colorbar
+        # colorbar
         self.cbar.remove()
-        cb_axes = plt.axes([0.04,0.11,0.01,0.78])
+        cb_axes = plt.axes([0.04, 0.11, 0.01, 0.78])
         self.cbar = self.fig.colorbar(self.tsne_scat, cax=cb_axes)
         self.cbar.set_label("Estimated value")
 
-        self.screenplot = self.ax_screen.imshow(self.screens[self.ind], interpolation='none')
-
-        self.ax_screen.set_xticklabels([])
-        self.ax_screen.set_yticklabels([])
-        #self.ax_tsne.autoscale(False)
+        # draw, and then save the tSNE plot to avoid redrawing when not updating the tSNE
         self.fig.canvas.draw()
-        
-        self.prev_color = self.tsne_scat.get_facecolors()[self.prev_ind]
 
-    def on_scatter_pick(self,event):
-        self.ind = event.ind[0]
+        # self.tsne_plot = self.fig.canvas.copy_from_bbox(self.ax_tsne.bbox)
+
+        # draw the currently selected point & update the image
         self.update_plot()
-        self.prev_ind = self.ind
+
+        # self.ax_tsne.autoscale(False)
+
+    def on_scatter_pick(self, event):
+        # print("Scatter pick")
+        self.idx = event.ind[0]
+        self.update_plot()
 
     def update_plot(self):
-        self.screenplot.set_array(self.screens[self.ind])
-        #self.stateplot.set_array(self.states[self.ind])
-        sizes = self.tsne_scat.get_sizes()
-        sizes[self.ind] = 100
-        sizes[self.prev_ind] = self.pnt_size
-        self.tsne_scat.set_sizes(sizes)
-        
-        colors = self.tsne_scat.get_facecolors()
-        colors[self.prev_ind] = self.prev_color
-        self.prev_color = colors[self.ind]
-        colors[self.ind] = np.array([0, 0, 0, 1])
-        self.tsne_scat.set_facecolors(colors)
-        
-        self.tsne_scat.set_color(colors)
-        
-        self.fig.canvas.draw()
-        #print 'chosen point: %d' % self.ind
+        # print("Update called")
+        # update state image
+        self.image.set_array(self.images[self.idx])
+
+        # Update point
+        self.point.set_data([self.data_t[self.idx, 0]],
+                            [self.data_t[self.idx, 1]])
+        self.point.set_markerfacecolor(
+            self.tsne_scat.get_facecolors()[self.idx])
+
+        # self.ax_tsne.cla()
+
+        # restore the tSNE plot
+        self.fig.canvas.restore_region(self.tsne_plot)
+
+        # draw animated components
+        self.draw_animated()
+
+        # blit in the axes
+        self.fig.canvas.blit(self.ax_tsne.bbox)
+        self.fig.canvas.blit(self.ax_image.bbox)
 
     def samdp(self):
-        
-        nc, coords, v_samdp, labels, P, vmse, inertia, entropy = samdp_search(self.data_t, self.values, self.rewards, 16, 30, 2, 5)
-        
-        self.ax_tsne.cla()
-        
-        self.tsne_scat = self.ax_tsne.scatter(self.data_t[:,0],
-                                     self.data_t[:,1],
-                                     s= np.ones(self.num_points)*self.pnt_size, c = self.values, cmap='gist_rainbow',picker=5)
 
-        self.ax_tsne.set_xticklabels([])
-        self.ax_tsne.set_yticklabels([])
-        
-        for i in range(nc):
-            for j in range(nc):
-                if P[i, j] > 0.05:
-                    self.ax_tsne.plot([coords[i, 0], coords[j, 0]], [coords[i, 1], coords[j, 1]], c='black', linewidth=P[i, j]*5, alpha=0.5)
+        if self.samdp_done:
+            return
 
-        self.ax_tsne.scatter(coords[:, 0], coords[:, 1], s=100, c='black', marker='D')
-        
+        self.nc, self.coords, v_samdp, labels, self.P, vmse, inertia, entropy = samdp_search(
+            self.data_t, self.values, self.rewards, 12, 30, 2, 6)
 
-        #self.ax_tsne.autoscale(False)
-        self.fig.canvas.draw()
+        self.samdp_done = True
 
+        # self.ax_tsne.cla()
+
+        # self.tsne_scat = self.ax_tsne.scatter(self.data_t[:, 0],
+        #                                       self.data_t[:, 1],
+        #                                       s=np.ones(self.num_points)*self.pnt_size, c=self.values, cmap='gist_rainbow', picker=5)
+
+        # self.ax_tsne.set_xticklabels([])
+        # self.ax_tsne.set_yticklabels([])
+
+        # restore the tSNE plot
+        self.fig.canvas.restore_region(self.tsne_plot)
+
+        # draw animated components
+        self.draw_animated()
+
+        # blit in the axes
+        self.fig.canvas.blit(self.ax_tsne.bbox)
+        self.fig.canvas.blit(self.ax_image.bbox)
 
     def clear_samdp(self):
-        
-        self.ax_tsne.cla()
-        self.tsne_scat = self.ax_tsne.scatter(self.data_t[:,0],
-                                     self.data_t[:,1],
-                                     s= np.ones(self.num_points)*self.pnt_size, c = self.values, cmap='gist_rainbow',picker=5)
 
-        self.ax_tsne.set_xticklabels([])
-        self.ax_tsne.set_yticklabels([])
+        # self.ax_tsne.cla()
+        # self.tsne_scat = self.ax_tsne.scatter(self.data_t[:, 0],
+        #                                       self.data_t[:, 1],
+        #                                       s=np.ones(self.num_points)*self.pnt_size, c=self.values, cmap='gist_rainbow', picker=5)
 
-        #self.ax_tsne.autoscale(False)
-        self.fig.canvas.draw()
+        # self.ax_tsne.set_xticklabels([])
+        # self.ax_tsne.set_yticklabels([])
 
+        self.samdp_done = False
+        self.nc = 0
+        self.coords = np.array([[]])
+        self.P = np.array([[]])
+
+        # restore the tSNE plot
+        self.fig.canvas.restore_region(self.tsne_plot)
+
+        # draw animated components
+        self.draw_animated()
+
+        # blit in the axes
+        self.fig.canvas.blit(self.ax_tsne.bbox)
+        self.fig.canvas.blit(self.ax_image.bbox)
 
     def show(self):
         plt.show(block=True)
 
 
-
 obj = VIS_TOOL()
 obj.show()
-
-
-
-
