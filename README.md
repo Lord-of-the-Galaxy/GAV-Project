@@ -1,6 +1,8 @@
 # GAV-Project
 Course project for [E0 271: Graphics and Visualization](https://www.csa.iisc.ac.in/~vijayn/courses/Graphics/index.html). Based on [Graying the Black Box: Understanding DQNs](https://arxiv.org/abs/1602.02658).
 
+![Screenshot of tool](SAMDP_VIS_TOOL.png?raw=true)
+
 ## Requirements and Installation
 
 It is recommended to create two separate environments using [mamba](https://mamba.readthedocs.io/)/[conda](https://docs.conda.io/en/latest/) for the data generation and visualization. In the data generation environment, you must install [Stable Baselines3](https://github.com/DLR-RM/stable-baselines3) with Atari support (with `pip`, the following command may be sufficient: `pip install git+https://github.com/DLR-RM/stable-baselines3#egg=stable-baselines3[extra]`), along with [tqdm](https://tqdm.github.io/) and [rich](https://rich.readthedocs.io/). In the visualization environment, you must install [RAPIDS](https://rapids.ai/index.html) [cuML](https://github.com/rapidsai/cuml) along with [matplotlib](https://matplotlib.org/) and [scikit-learn](https://scikit-learn.org/stable/index.html).  
